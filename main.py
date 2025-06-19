@@ -236,6 +236,11 @@ def handle_callback(call):
     
     save_data(data)
 
+
+
 if __name__ == '__main__':
     print("Бот запущен!")
     bot.infinity_polling()
+
+# @bot.message_handler(commands=["start_chat"])
+# def
