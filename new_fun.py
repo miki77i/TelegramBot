@@ -20,17 +20,14 @@ from telegram.ext import (
     CallbackQueryHandler,
 )
 
-# Файлы для хранения данных
 USERS_FILE = 'users.json'
 REVIEWS_FILE = 'reviews.json'
 
-# Логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Константы состояний для ConversationHandler
 (
     CHOOSE_GENDER,
     ENTER_AGE,
@@ -49,8 +46,6 @@ logger = logging.getLogger(__name__)
     REVIEW_ENTER_TARGET,
     REVIEW_ENTER_TEXT,
 ) = range(8, 10)
-
-# --- Вспомогательные функции для работы с JSON ---
 
 def load_json(filename, default):
     if os.path.exists(filename):
@@ -89,7 +84,33 @@ def find_user_by_username(username):
             return u
     return None
 
-# --- Главное меню с кнопками ---
+# --- Добавим хранилище лайков в память (можно заменить на файл при необходимости) ---
+# Формат: {user_id: set(user_id_которым поставлен лайк)}
+LIKES_FILE = 'likes.json'
+
+def get_likes():
+    return load_json(LIKES_FILE, {})
+
+def set_likes(data):
+    save_json(LIKES_FILE, data)
+
+def add_like(from_user_id, to_user_id):
+    likes = get_likes()
+    str_from = str(from_user_id)
+    str_to = str(to_user_id)
+    if str_from not in likes:
+        likes[str_from] = []
+    if str_to not in likes[str_from]:
+        likes[str_from].append(str_to)
+    set_likes(likes)
+
+def check_mutual_like(user1_id, user2_id):
+    likes = get_likes()
+    str_user1 = str(user1_id)
+    str_user2 = str(user2_id)
+    return (str_user1 in likes and str_user2 in likes[str_user1]) and (str_user2 in likes and str_user1 in likes[str_user2])
+
+# --- Главное меню ---
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -102,12 +123,8 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-# --- Команда /start ---
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await main_menu(update, context)
-
-# --- Обработка выбора из главного меню ---
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
@@ -237,7 +254,7 @@ async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['photo_id'] = None
     return await upload_photo(update, context)
 
-# --- Поиск собеседников и просмотр анкет ---
+# --- Поиск и просмотр анкет с лайками и отзывами ---
 
 async def show_profile(update_obj, context, profiles, index):
     if index >= len(profiles):
@@ -258,6 +275,9 @@ async def show_profile(update_obj, context, profiles, index):
         [
             InlineKeyboardButton("👍 Нравится", callback_data=f"like_{index}"),
             InlineKeyboardButton("➡️ Пропустить", callback_data=f"skip_{index}")
+        ],
+        [
+            InlineKeyboardButton("Отзывы", callback_data=f"reviews_{index}")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -308,16 +328,75 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not results:
         await query.edit_message_text("Нет анкет для показа.")
         return
+
     if data.startswith("like_"):
+        # Лайкнули анкету с индексом
+        liked_index = int(data.split('_')[1])
+        liked_user = results[liked_index]
+        liker_id = query.from_user.id
+        liked_id = liked_user['user_id']
+
+        add_like(liker_id, liked_id)
         await query.answer("Вы поставили лайк!")
+
+        # Проверяем взаимный лайк
+        if check_mutual_like(liker_id, liked_id):
+            # Отправляем уведомления обоим пользователям
+            liker = find_user_by_id(liker_id)
+            liked = find_user_by_id(liked_id)
+            if liker and liked:
+                liker_name = liker.get('username') or f"Пользователь {liker_id}"
+                liked_name = liked.get('username') or f"Пользователь {liked_id}"
+
+                try:
+                    await context.bot.send_message(
+                        chat_id=liker_id,
+                        text=f"У вас взаимный лайк с @{liked_name}! Вот его анкета:\n"
+                             f"Пол: {liked['gender']}\nВозраст: {liked['age']}\nО себе: {liked['about']}\nTelegram: @{liked.get('username', 'не указан')}"
+                    )
+                    await context.bot.send_message(
+                        chat_id=liked_id,
+                        text=f"У вас взаимный лайк с @{liker_name}! Вот его анкета:\n"
+                             f"Пол: {liker['gender']}\nВозраст: {liker['age']}\nО себе: {liker['about']}\nTelegram: @{liker.get('username', 'не указан')}"
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке уведомления о взаимном лайке: {e}")
+
+        index = liked_index + 1
+        context.user_data['search_index'] = index
+        if index < len(results):
+            await show_profile(query, context, results, index)
+        else:
+            await query.edit_message_text("Анкеты закончились.")
+
     elif data.startswith("skip_"):
+        skip_index = int(data.split('_')[1])
         await query.answer("Анкета пропущена.")
-    index += 1
-    context.user_data['search_index'] = index
-    if index < len(results):
-        await show_profile(query, context, results, index)
-    else:
-        await query.edit_message_text("Анкеты закончились.")
+        index = skip_index + 1
+        context.user_data['search_index'] = index
+        if index < len(results):
+            await show_profile(query, context, results, index)
+        else:
+            await query.edit_message_text("Анкеты закончились.")
+
+    elif data.startswith("reviews_"):
+        rev_index = int(data.split('_')[1])
+        profile = results[rev_index]
+        username = profile.get('username')
+        if not username:
+            await query.answer("У этого пользователя нет username, отзывы недоступны.", show_alert=True)
+            return
+        reviews = get_reviews()
+        user_reviews = reviews.get(username.lower(), [])
+        if not user_reviews:
+            text = "Отзывов о пользователе пока нет."
+        else:
+            text = "Отзывы о пользователе:\n\n" + "\n\n".join(user_reviews)
+        try:
+            await query.answer()
+            await query.message.reply_text(text)
+        except Exception as e:
+            logger.error(f"Ошибка при отправке отзывов: {e}")
 
 # --- Редактирование профиля ---
 
@@ -462,9 +541,10 @@ async def review_enter_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ошибка: не выбран пользователь.")
         return ConversationHandler.END
     reviews = get_reviews()
-    if username not in reviews:
-        reviews[username] = []
-    reviews[username].append(text)
+    key = username.lower()
+    if key not in reviews:
+        reviews[key] = []
+    reviews[key].append(text)
     set_reviews(reviews)
     await update.message.reply_text("Ваш отзыв сохранён!", reply_markup=ReplyKeyboardRemove())
     await main_menu(update, context)
@@ -476,7 +556,7 @@ async def show_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У вас нет username.")
         return
     reviews = get_reviews()
-    user_reviews = reviews.get(f"@{username.lower()}", []) + reviews.get(username.lower(), [])
+    user_reviews = reviews.get(username.lower(), [])
     if not user_reviews:
         await update.message.reply_text("Отзывов о вас пока нет.")
     else:
@@ -484,11 +564,10 @@ async def show_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await main_menu(update, context)
     return
 
-# --- Основная функция запуска бота ---
+# --- Запуск бота ---
 
 def main():
-    # Замените YOUR_BOT_TOKEN на токен вашего бота
-    application = Application.builder().token("YOUR_BOT_TOKEN").build()
+    application = Application.builder().token("8121277507:AAEvqSpC30D6kQzU1-ACkDgJ5FLomy7DKnc").build()
 
     conv_handler = ConversationHandler(
         entry_points=[
@@ -521,7 +600,6 @@ def main():
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(button_handler))
 
-    # Запуск бота
     application.run_polling()
 
 if __name__ == "__main__":
