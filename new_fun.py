@@ -468,7 +468,7 @@ async def show_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 def main():
-    application = Application.builder().token("YOUR_BOT_TOKEN").build()
+    application = Application.builder().token("8121277507:AAEvqSpC30D6kQzU1-ACkDgJ5FLomy7DKnc").build()
 
     conv_handler = ConversationHandler(
         entry_points=[
