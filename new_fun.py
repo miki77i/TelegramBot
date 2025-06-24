@@ -269,7 +269,6 @@ async def show_profile(update_obj, context, profiles, index):
         f"Пол: {profile['gender']}\n"
         f"Возраст: {profile['age']}\n"
         f"О себе: {profile['about']}\n"
-        f"Telegram: @{profile.get('username', 'не указан')}"
     )
     keyboard = [
         [
