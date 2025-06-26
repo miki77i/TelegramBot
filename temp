@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 ) = range(10)
 
 # Имя файла базы данных
-DATABASE_FILE = 'dating_bot.db'
+DATABASE_FILE = 'database'
 
 class Database:
     def __init__(self, db_file=DATABASE_FILE):
@@ -67,8 +67,8 @@ class Database:
                     target_gender TEXT,
                     age_min INTEGER,
                     age_max INTEGER,
-                    photo_id TEXT,
-                    join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    photo_id TEXT
+                    
                 )
             ''')
             
@@ -78,22 +78,19 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     from_user_id INTEGER,
                     to_user_id INTEGER,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(from_user_id, to_user_id)
+                    UNIQUE(from_user_id, to_user_id))
             ''')
             
             # Таблица отзывов
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS reviews (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    target_username TEXT,
-                    author_id INTEGER,
-                    text TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
+           # cursor.execute('''
+            #    CREATE TABLE IF NOT EXISTS reviews (
+             #       id INTEGER PRIMARY KEY AUTOINCREMENT,
+              #      target_username TEXT NOT NULL,
+               #     text TEXT NOT NULL
+                #)
+            #''')
             
-            conn.commit()
+            #conn.commit()
 
     def add_user(self, user_id, username, first_name, last_name):
         """Добавление нового пользователя"""
@@ -162,14 +159,14 @@ class Database:
             ''', (user1_id, user2_id, user2_id, user1_id))
             return cursor.fetchone()[0] == 2
 
-    def add_review(self, target_username, author_id, text):
+    def add_review(self, target_username, text):
         """Добавление отзыва"""
         with sqlite3.connect(self.db_file) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO reviews (target_username, author_id, text)
-                VALUES (?, ?, ?)
-            ''', (target_username.lower(), author_id, text))
+                INSERT INTO reviews (target_username, text)
+                VALUES (?, ?)
+            ''', (target_username.lower(), text))
             conn.commit()
 
     def get_reviews(self, username):
@@ -179,7 +176,7 @@ class Database:
             cursor.execute('''
                 SELECT text FROM reviews
                 WHERE target_username = ?
-                ORDER BY timestamp DESC
+                
             ''', (username.lower(),))
             return [row[0] for row in cursor.fetchall()]
 
@@ -225,10 +222,10 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif text == "оставить отзыв":
         await update.message.reply_text(
-            "Введите username пользователя, о котором хотите оставить отзыв (например, @username):",
-            reply_markup=ReplyKeyboardRemove()
+            "Пока в разработке.",
+           reply_markup=ReplyKeyboardRemove()
         )
-        return REVIEW_ENTER_TARGET
+        return main_menu
         
     elif text == "посмотреть отзывы":
         return await show_reviews(update, context)
@@ -388,10 +385,10 @@ async def show_profile(update_obj, context, profiles, index):
                 reply_markup=reply_markup
             )
     else:
-        if hasattr(update_obj, 'callback_query'):
-            await update_obj.callback_query.edit_message_text(text, reply_markup=reply_markup)
-        else:
-            await update_obj.message.reply_text(text, reply_markup=reply_markup)
+    #     if hasattr(update_obj, 'callback_query'):
+    #         await update_obj.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    #     else:
+        await update_obj.message.reply_text(text, reply_markup=reply_markup)
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -441,25 +438,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             liked = db.get_user(liked_id)
             
             if liker and liked:
-                liker_name = liker.get('username') or f"Пользователь {liker_id}"
-                liked_name = liked.get('username') or f"Пользователь {liked_id}"
+                liker_name = liker['username'] or f"Пользователь {liker_id}"
+                liked_name = liked['username'] or f"Пользователь {liked_id}"
 
                 try:
                     await context.bot.send_message(
                         chat_id=liker_id,
                         text=f"У вас взаимный лайк с @{liked_name}!\n"
-                             f"Пол: {liked.get('gender', 'не указан')}\n"
-                             f"Возраст: {liked.get('age', 'не указан')}\n"
-                             f"О себе: {liked.get('about', 'не указано')}\n"
-                             f"Telegram: @{liked.get('username', 'не указан')}"
+                             f"Пол: {liked['gender']}\n"
+                             f"Возраст: {liked['age']}\n"
+                             f"О себе: {liked['about']}\n"
+                             f"Telegram: @{liked['username']}"
+
                     )
                     await context.bot.send_message(
                         chat_id=liked_id,
                         text=f"У вас взаимный лайк с @{liker_name}!\n"
-                             f"Пол: {liker.get('gender', 'не указан')}\n"
-                             f"Возраст: {liker.get('age', 'не указан')}\n"
-                             f"О себе: {liker.get('about', 'не указано')}\n"
-                             f"Telegram: @{liker.get('username', 'не указан')}"
+                             f"Пол: {liker['gender']}\n"
+                             f"Возраст: {liker['age']}\n"
+                             f"О себе: {liker['about']}\n"
+                             f"Telegram: @{liker['username']}"
                     )
                 except Exception as e:
                     logger.error(f"Ошибка при отправке уведомления: {e}")
@@ -614,33 +612,34 @@ async def review_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return REVIEW_ENTER_TARGET
 
-async def review_enter_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.message.text.strip()
-    if not username.startswith('@'):
-        username = '@' + username
+# async def review_enter_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     username = update.message.text.strip()
+#     if not username.startswith('@'):
+#         username = '@' + username
         
-    context.user_data['review_target'] = username
-    await update.message.reply_text(f"Напишите текст отзыва для {username}:")
-    return REVIEW_ENTER_TEXT
+#     context.user_data['review_target'] = username
+#     await update.message.reply_text(f"Напишите текст отзыва для {username}:")
+#     return REVIEW_ENTER_TEXT
 
-async def review_enter_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    username = context.user_data.get('review_target')
+# async def review_enter_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     text = update.message.text.strip()
+#     username = context.user_data.get('review_target')
     
-    if not username:
-        await update.message.reply_text("Ошибка: не выбран пользователь.")
-        return ConversationHandler.END
+#     if not username:
+#         await update.message.reply_text("Ошибка: не выбран пользователь.")
+#         return ConversationHandler.END
     
-    if len(text) > 100:
-        await update.message.reply_text("Отзыв слишком длинный (максимум 100 символов). Пожалуйста, напишите короче:")
-        return REVIEW_ENTER_TEXT
+#     if len(text) > 100:
+#         await update.message.reply_text("Отзыв слишком длинный (максимум 100 символов). Пожалуйста, напишите короче:")
+#         return REVIEW_ENTER_TEXT
     
-    author_id = update.message.from_user.id
-    db.add_review(username, author_id, text)
+    # author_id = update.message.from_user.id
+    # print(f"Данные: username={username}, text={text}")
+    # db.add_review(username, text)
     
-    await update.message.reply_text("Ваш отзыв сохранён!")
-    await main_menu(update, context)
-    return ConversationHandler.END
+    # await update.message.reply_text("Ваш отзыв сохранён!")
+    # await main_menu(update, context)
+    # return ConversationHandler.END
 
 async def show_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.from_user.username
@@ -665,7 +664,7 @@ async def show_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Запуск бота ---
 
 def main():
-    application = Application.builder().token("YOUR_BOT_TOKEN").build()
+    application = Application.builder().token("8121277507:AAEvqSpC30D6kQzU1-ACkDgJ5FLomy7DKnc").build()
 
     conv_handler = ConversationHandler(
         entry_points=[
@@ -688,8 +687,8 @@ def main():
                 MessageHandler(filters.PHOTO, edit_field),
                 CommandHandler("skip", skip_photo_edit)
             ],
-            REVIEW_ENTER_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, review_enter_target)],
-            REVIEW_ENTER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, review_enter_text)],
+            # REVIEW_ENTER_TARGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, review_enter_target)],
+            # REVIEW_ENTER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, review_enter_text)],
         },
         fallbacks=[CommandHandler("start", start)],
     )
