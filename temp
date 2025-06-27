@@ -353,7 +353,6 @@ async def show_profile(update_obj, context, profiles, index):
         f"Пол: {profile.get('gender', 'не указан')}\n"
         f"Возраст: {profile.get('age', 'не указан')}\n"
         f"О себе: {profile.get('about', 'не указано')}\n"
-        f"Username: @{username if username else 'не указан'}\n"
     )
     
     # Добавляем отзывы, если они есть
